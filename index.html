@@ -1,48 +1,237 @@
 
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Android Camera Test</title>
-<style>
-body{font:16px Arial;background:#171020;color:white;padding:18px}
-button{padding:12px;background:#ffad42;border:0;border-radius:8px}
-video{width:100%;margin-top:16px;background:black}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Halloween Camera</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #171020;
+      color: white;
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+    h1 { color: #ffad42; }
+    video {
+      display: block;
+      width: 100%;
+      max-width: 640px;
+      margin: 18px auto;
+      background: #000;
+      border-radius: 12px;
+    }
+    button {
+      padding: 13px 20px;
+      margin: 6px;
+      border: 0;
+      border-radius: 9px;
+      background: #ffad42;
+      color: #21152b;
+      font-weight: bold;
+      font-size: 16px;
+    }
+    button:disabled { opacity: 0.5; }
+    #status {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      line-height: 1.5;
+    }
+  </style>
 </head>
 <body>
-<h2>🎃 Halloween Camera Test</h2>
-<button id="start">Start camera</button>
-<button id="stop">Stop camera</button>
-<video id="preview" autoplay muted playsinline></video>
-<p id="status">Ready to test.</p>
-<script>
-let stream;
-const status = document.getElementById("status");
-document.getElementById("start").onclick = async () => {
-  try {
-    status.textContent = "Checking camera...";
-    if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error("Camera API unavailable. Check HTTPS and Chrome.");
+  <h1>🎃 Halloween Camera</h1>
+  <p>Keep this page open while playing the game.</p>
+
+  <video id="preview" autoplay muted playsinline></video>
+
+  <button id="start">Start Camera & Connect</button>
+  <button id="stop" disabled>Stop Camera</button>
+
+  <p id="status">Ready. Open this page using the laptop's QR code.</p>
+
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script>
+    const preview = document.getElementById("preview");
+    const statusText = document.getElementById("status");
+    const startButton = document.getElementById("start");
+    const stopButton = document.getElementById("stop");
+
+    let peer = null;
+    let cameraStream = null;
+    let cameraCall = null;
+    let starting = false;
+    let stoppedByUser = false;
+
+    function status(message) {
+      statusText.textContent = message;
     }
-    if (stream) stream.getTracks().forEach(t => t.stop());
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" },
-      audio: false
+
+    function stopEverything() {
+      stoppedByUser = true;
+
+      if (cameraCall) {
+        cameraCall.close();
+        cameraCall = null;
+      }
+
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+      }
+
+      if (peer) {
+        peer.destroy();
+        peer = null;
+      }
+
+      preview.srcObject = null;
+      startButton.disabled = false;
+      stopButton.disabled = true;
+      starting = false;
+    }
+
+    function explainError(error) {
+      const name = error && error.name ? error.name : "Error";
+      const message = error && error.message ? error.message : String(error);
+
+      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        return "Camera permission denied. Allow camera access for Chrome and this website.";
+      }
+
+      if (name === "NotReadableError" || name === "TrackStartError") {
+        return "The camera may be busy. Close other camera apps, force-stop Chrome, then retry.";
+      }
+
+      if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        return "No available camera was found on this phone.";
+      }
+
+      if (name === "OverconstrainedError") {
+        return "The requested camera settings are unavailable. Try another camera setting.";
+      }
+
+      return name + ": " + message;
+    }
+
+    async function startCamera() {
+      if (starting || cameraStream) return;
+
+      stoppedByUser = false;
+      starting = true;
+      startButton.disabled = true;
+      status("Requesting camera permission...");
+
+      try {
+        const targetPeer = new URLSearchParams(location.search).get("peer");
+
+        if (!targetPeer) {
+          throw new Error(
+            "Laptop peer ID is missing. Open the phone page by scanning the QR code on halloween.html."
+          );
+        }
+
+        if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+          throw new Error(
+            "Camera access requires HTTPS. Open the published GitHub Pages link."
+          );
+        }
+
+        if (typeof Peer === "undefined") {
+          throw new Error(
+            "PeerJS did not load. Check your internet connection and reload this page."
+          );
+        }
+
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 640 }
+          },
+          audio: false
+        });
+
+        if (stoppedByUser) {
+          cameraStream.getTracks().forEach(track => track.stop());
+          cameraStream = null;
+          return;
+        }
+
+        preview.srcObject = cameraStream;
+        await preview.play();
+
+        status("Camera working. Connecting to laptop...");
+
+        peer = new Peer();
+
+        peer.on("open", id => {
+          if (stoppedByUser || !cameraStream) return;
+
+          status("Camera working.\nConnecting to laptop...");
+
+          try {
+            cameraCall = peer.call(targetPeer, cameraStream);
+
+            if (!cameraCall) {
+              status("Could not start the video call. Restart both pages and retry.");
+              return;
+            }
+
+            cameraCall.on("stream", () => {
+              status("Connected to laptop. Camera is streaming.");
+            });
+
+            cameraCall.on("close", () => {
+              if (!stoppedByUser) {
+                status("Video connection closed. Restart the connection to retry.");
+              }
+            });
+
+            cameraCall.on("error", error => {
+              status("Video connection error: " + error.message);
+            });
+
+            status("Camera working. Waiting for laptop to receive the video...");
+          } catch (error) {
+            status("Could not call laptop: " + error.message);
+          }
+        });
+
+        peer.on("error", error => {
+          status("PeerJS error: " + error.type + " — " + error.message);
+        });
+
+        peer.on("disconnected", () => {
+          if (!stoppedByUser) {
+            status("Signaling connection lost. Check internet and reload.");
+          }
+        });
+
+        stopButton.disabled = false;
+
+      } catch (error) {
+        status(explainError(error));
+        if (cameraStream) {
+          cameraStream.getTracks().forEach(track => track.stop());
+          cameraStream = null;
+        }
+        preview.srcObject = null;
+        startButton.disabled = false;
+      } finally {
+        starting = false;
+      }
+    }
+
+    startButton.addEventListener("click", startCamera);
+
+    stopButton.addEventListener("click", () => {
+      stopEverything();
+      status("Camera stopped.");
     });
-    document.getElementById("preview").srcObject = stream;
-    status.textContent = "Camera started successfully.";
-  } catch (e) {
-    status.textContent = e.name + ": " + e.message;
-  }
-};
-document.getElementById("stop").onclick = () => {
-  if (stream) stream.getTracks().forEach(t => t.stop());
-  stream = null;
-  document.getElementById("preview").srcObject = null;
-  status.textContent = "Camera stopped.";
-};
-</script>
+
+    window.addEventListener("pagehide", stopEverything);
+  </script>
 </body>
 </html>
