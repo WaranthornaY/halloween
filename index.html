@@ -4,9 +4,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Halloween Phone Camera</title>
+<title>Halloween Camera</title>
 <style>
-body{font:16px Arial;background:#171020;color:white;text-align:center;padding:16px}
+body{font-family:Arial;background:#171020;color:white;text-align:center;padding:18px}
 h1{color:#ffad42}
 video{width:100%;max-width:640px;background:#000;border-radius:12px}
 button{padding:13px;margin:6px;border:0;border-radius:8px;background:#ffad42;font-weight:bold}
@@ -15,48 +15,28 @@ button{padding:13px;margin:6px;border:0;border-radius:8px;background:#ffad42;fon
 </head>
 <body>
 <h1>🎃 Halloween Camera</h1>
-<p>Keep this page open while the laptop game is running.</p>
-<video id="preview" autoplay muted playsinline></video>
-<br>
+<p>Keep this page open while playing.</p>
+<video id="preview" autoplay muted playsinline></video><br>
 <button id="start">Start Camera & Connect</button>
 <button id="stop" disabled>Stop Camera</button>
-<p id="status">Scan the QR code shown on the laptop first.</p>
+<p id="status">Scan the laptop QR code to begin.</p>
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 const preview = document.getElementById("preview");
-const statusBox = document.getElementById("status");
+const status = document.getElementById("status");
 const startButton = document.getElementById("start");
 const stopButton = document.getElementById("stop");
 
-let peer = null;
-let stream = null;
-let call = null;
-let starting = false;
-let stopped = false;
+let peer = null, stream = null, call = null, starting = false;
 
-function showStatus(text) {
-  statusBox.textContent = text;
-}
-
-function releaseResources() {
-  stopped = true;
-
-  if (call) {
-    call.close();
-    call = null;
-  }
-
+function stopCamera() {
+  if (call) { call.close(); call = null; }
   if (stream) {
     stream.getTracks().forEach(track => track.stop());
     stream = null;
   }
-
-  if (peer) {
-    peer.destroy();
-    peer = null;
-  }
-
+  if (peer) { peer.destroy(); peer = null; }
   preview.srcObject = null;
   startButton.disabled = false;
   stopButton.disabled = true;
@@ -65,107 +45,49 @@ function releaseResources() {
 
 async function startCamera() {
   if (starting || stream) return;
-
   starting = true;
-  stopped = false;
   startButton.disabled = true;
-  showStatus("Checking the laptop pairing link...");
 
   try {
     const laptopId = new URLSearchParams(location.search).get("peer");
+    if (!laptopId) throw new Error("Missing laptop ID. Scan the fresh QR code on the laptop.");
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
+      throw new Error("Open this page using HTTPS.");
+    if (typeof Peer === "undefined")
+      throw new Error("PeerJS failed to load. Check internet and reload.");
 
-    if (!laptopId) {
-      throw new Error(
-        "Laptop peer ID is missing. Open the phone page by scanning the QR code on halloween.html."
-      );
-    }
-
-    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-      throw new Error("Open this page using its HTTPS GitHub Pages address.");
-    }
-
-    if (typeof Peer === "undefined") {
-      throw new Error("PeerJS did not load. Check internet access and reload.");
-    }
-
-    showStatus("Requesting camera access...");
+    status.textContent = "Requesting camera...";
     stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: "environment" },
-        width: { ideal: 640 }
-      },
-      audio: false
+      video: {facingMode:{ideal:"environment"},width:{ideal:640}},
+      audio:false
     });
-
-    if (stopped) {
-      stream.getTracks().forEach(track => track.stop());
-      stream = null;
-      return;
-    }
-
     preview.srcObject = stream;
     await preview.play();
-    showStatus("Camera is working. Connecting to laptop...");
+    status.textContent = "Camera working. Connecting to laptop...";
 
     peer = new Peer();
-
     peer.on("open", () => {
-      if (stopped || !stream) return;
-
-      try {
-        call = peer.call(laptopId, stream);
-
-        if (!call) {
-          throw new Error("PeerJS could not create a video call.");
-        }
-
-        const pc = call.peerConnection;
-
-        if (pc) {
-          pc.onconnectionstatechange = () => {
-            if (stopped) return;
-            const state = pc.connectionState;
-
-            if (state === "connected") {
-              showStatus("Connected! Sending camera video to laptop.");
-            } else if (state === "failed") {
-              showStatus("WebRTC connection failed. Check internet on both devices.");
-            } else if (state === "disconnected") {
-              showStatus("Connection interrupted. Waiting for it to recover...");
-            }
-          };
-        }
-
-        showStatus("Camera is working. Waiting for laptop connection...");
-        call.on("close", () => {
-          if (!stopped) showStatus("Video call closed. Restart the connection.");
-        });
-        call.on("error", error => {
-          showStatus("Video call error: " + error.message);
-        });
-      } catch (error) {
-        showStatus("Connection error: " + error.message);
+      if (!stream) return;
+      call = peer.call(laptopId, stream);
+      if (!call) {
+        status.textContent = "Could not create video call.";
+        return;
       }
+      call.on("close", () => {
+        status.textContent = "Video call closed. Restart both pages.";
+      });
+      call.on("error", e => status.textContent = "Call error: " + e.message);
+      status.textContent = "Camera working. Waiting for laptop...";
     });
-
-    peer.on("error", error => {
-      showStatus("PeerJS error: " + error.type + " — " + error.message);
-    });
-
-    peer.on("disconnected", () => {
-      if (!stopped) showStatus("PeerJS signaling disconnected. Check internet.");
-    });
-
+    peer.on("error", e => status.textContent =
+      "PeerJS error: " + e.type + " — " + e.message);
+    peer.on("disconnected", () => status.textContent =
+      "Signaling disconnected. Check internet.");
     stopButton.disabled = false;
-
-  } catch (error) {
-    showStatus((error.name ? error.name + ": " : "Error: ") + error.message);
-
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      stream = null;
-    }
-
+  } catch (e) {
+    status.textContent = (e.name || "Error") + ": " + e.message;
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null;
     preview.srcObject = null;
     startButton.disabled = false;
   } finally {
@@ -173,12 +95,12 @@ async function startCamera() {
   }
 }
 
-startButton.addEventListener("click", startCamera);
-stopButton.addEventListener("click", () => {
-  releaseResources();
-  showStatus("Camera stopped.");
-});
-window.addEventListener("pagehide", releaseResources);
+startButton.onclick = startCamera;
+stopButton.onclick = () => {
+  stopCamera();
+  status.textContent = "Camera stopped.";
+};
+window.addEventListener("pagehide", stopCamera);
 </script>
 </body>
 </html>
