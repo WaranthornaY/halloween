@@ -1,74 +1,47 @@
 
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Halloween Phone Camera</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Android Camera Test</title>
 <style>
-body{font-family:Arial;background:#191020;color:#fff;padding:18px}
-button{padding:12px;background:#ffad42;border:0;border-radius:8px;font-weight:bold}
-video{width:100%;margin-top:15px;background:#000;border-radius:10px}
+body{font:16px Arial;background:#171020;color:white;padding:18px}
+button{padding:12px;background:#ffad42;border:0;border-radius:8px}
+video{width:100%;margin-top:16px;background:black}
 </style>
 </head>
 <body>
-<h1>🎃 Halloween Candy Camera</h1>
-<p>Open this page by scanning the pairing QR code on the laptop.</p>
-<button id="start">Start camera and connect</button>
+<h2>🎃 Halloween Camera Test</h2>
+<button id="start">Start camera</button>
+<button id="stop">Stop camera</button>
 <video id="preview" autoplay muted playsinline></video>
-<p id="status">Waiting to connect.</p>
-
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<p id="status">Ready to test.</p>
 <script>
-const statusText = document.getElementById("status");
-const preview = document.getElementById("preview");
-const targetPeer = new URLSearchParams(location.search).get("peer");
-let peer;
-let cameraStream;
-
+let stream;
+const status = document.getElementById("status");
 document.getElementById("start").onclick = async () => {
-  if (!targetPeer) {
-    statusText.textContent =
-      "No laptop pairing code found. Scan the QR code shown by the laptop.";
-    return;
-  }
-
   try {
-    statusText.textContent = "Requesting camera permission...";
-    cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: "environment" }, width: { ideal: 640 } },
+    status.textContent = "Checking camera...";
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Camera API unavailable. Check HTTPS and Chrome.");
+    }
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
       audio: false
     });
-    preview.srcObject = cameraStream;
-    await preview.play();
-
-    statusText.textContent = "Connecting to laptop...";
-    peer = new Peer();
-
-    peer.on("open", () => {
-      const call = peer.call(targetPeer, cameraStream);
-      if (!call) {
-        statusText.textContent = "Could not start video call. Retry.";
-        return;
-      }
-      call.on("stream", () => {});
-      call.on("close", () => {
-        statusText.textContent = "Connection closed.";
-      });
-      call.on("error", e => {
-        statusText.textContent = "Call error: " + e.message;
-      });
-      statusText.textContent = "Camera running. Connecting video...";
-    });
-
-    peer.on("error", e => {
-      statusText.textContent = "Connection error: " + e.type;
-    });
+    document.getElementById("preview").srcObject = stream;
+    status.textContent = "Camera started successfully.";
   } catch (e) {
-    statusText.textContent =
-      "Camera error: " + e.message +
-      ". Open this page using HTTPS and allow camera permission.";
+    status.textContent = e.name + ": " + e.message;
   }
+};
+document.getElementById("stop").onclick = () => {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null;
+  document.getElementById("preview").srcObject = null;
+  status.textContent = "Camera stopped.";
 };
 </script>
 </body>
